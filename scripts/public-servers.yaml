@@ -1,0 +1,191 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: This is the setup for the server in udacity project two
+Parameters:
+
+  ProjectName:
+    Description: An environment name that will be prefixed to resource names
+    Type: String
+
+  StudentName:
+    Description: Name of the student who created the resources
+    Type: String
+
+Resources:
+#  LBSecGroup:
+#    Type: "AWS::EC2::SecurityGroup"
+#    Properties:
+#      GroupDescription: Allow http to our load balancer
+#      VpcId:
+#        Fn::ImportValue:
+#          !Sub "${ProjectName}-VPCID"
+#      SecurityGroupIngress:
+#        - IpProtocol: tcp
+#          FromPort: 80
+#          ToPort: 80
+#          CidrIp: 0.0.0.0/0
+#      SecurityGroupEgress:
+#        - IpProtocol: tcp
+#          FromPort: 80
+#          ToPort: 80
+#          CidrIp: 0.0.0.0/0
+#      Tags:
+#        - Key: Name
+#          Value: !Sub ${ProjectName} LB Sec Group
+#        - Key: ProjectName
+#          Value: !Ref ProjectName
+#        - Key: StudentName
+#          Value: !Ref StudentName
+  WebServerSecGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: Allow http to our hosts and SSH for all servers only
+      VpcId:
+        Fn::ImportValue:
+          !Sub "${ProjectName}-VPCID"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName} Web Sever Sec Group
+        - Key: ProjectName
+          Value: !Ref ProjectName
+        - Key: StudentName
+          Value: !Ref StudentName
+
+  ProfileWithRolesForOurApp:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - UdacityS3ReadOnlyEC2
+
+  WebAppLaunchConfig:
+    Type: "AWS::AutoScaling::LaunchConfiguration"
+    Properties:
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          apt-get update -y
+          apt-get install unzip awscli -y
+          apt-get install apache2 -y
+          systemctl start apache2.service
+          cd /var/www/html
+          aws s3 cp s3://udacity-project-two-web-app/udacity.zip .
+          unzip -o udacity.zip
+      ImageId: ami-07ebfd5b3428b6f4d # this AMI ID may not be available. Find a new base line Ubuntu image.
+      SecurityGroups:
+        - Ref: WebServerSecGroup
+      IamInstanceProfile:
+        Ref: ProfileWithRolesForOurApp
+      InstanceType: t2.micro
+      KeyName: udacity
+      BlockDeviceMappings:
+        - DeviceName: "/dev/sdk"
+          Ebs:
+            VolumeSize: '10'
+  WebAppGroup:
+    Type: "AWS::AutoScaling::AutoScalingGroup"
+    Properties:
+      VPCZoneIdentifier:
+        - Fn::ImportValue:
+            !Sub "${ProjectName}-PUB-NETS"
+      LaunchConfigurationName:
+        Ref: WebAppLaunchConfig
+      MinSize: '2'
+      MaxSize: '2'
+#      TargetGroupARNs:
+#        - Ref: WebAppTargetGroup
+#  WebAppLB:
+#    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+#    Properties:
+#      Subnets:
+#        - Fn::ImportValue: !Sub "${ProjectName}-PUB1-SN"
+#        - Fn::ImportValue: !Sub "${ProjectName}-PUB2-SN"
+#      SecurityGroups:
+#        - Ref: LBSecGroup
+#      Tags:
+#        - Key: Name
+#          Value: !Sub ${ProjectName} Web Balancer
+#        - Key: ProjectName
+#          Value: !Ref ProjectName
+#        - Key: StudentName
+#          Value: !Ref StudentName
+#  Listener:
+#    Type: "AWS::ElasticLoadBalancingV2::Listener"
+#    Properties:
+#      DefaultActions: #required
+#        - Type: forward
+#          TargetGroupArn:
+#            Ref: WebAppTargetGroup
+#      LoadBalancerArn: #required
+#        Ref: WebAppLB
+#      Port: '80' #required
+#      Protocol: HTTP #required
+#  ALBListenerRule:
+#    Type: "AWS::ElasticLoadBalancingV2::ListenerRule"
+#    Properties:
+#      Actions: #required
+#        - Type: forward
+#          TargetGroupArn: !Ref 'WebAppTargetGroup'
+#      Conditions: #required
+#        - Field: path-pattern
+#          Values: [/]
+#      ListenerArn: !Ref 'Listener' #required
+#      Priority: 1 #required
+#  WebAppTargetGroup:
+#    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+#    Properties:
+#      HealthCheckIntervalSeconds: 10
+#      HealthCheckPath: /
+#      HealthCheckProtocol: HTTP
+#      HealthCheckTimeoutSeconds: 8
+#      HealthyThresholdCount: 2
+#      Port: 80
+#      Protocol: HTTP
+#      UnhealthyThresholdCount: 5
+#      VpcId:
+#        Fn::ImportValue:
+#          Fn::Sub: "${ProjectName}-VPCID"
+  BastionHost:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-07ebfd5b3428b6f4d # this AMI ID may not be available. Find a new base line Ubuntu image.
+      InstanceType: t2.micro
+      KeyName: udacity
+      BlockDeviceMappings:
+          - DeviceName: "/dev/sdk"
+            Ebs:
+              VolumeSize: '10'
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: "0"
+          SubnetId:
+            Fn::ImportValue:
+              !Sub "${ProjectName}-PUB2-SN"
+          GroupSet:
+            - Ref: WebServerSecGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName} Bastion Host
+        - Key: ProjectName
+          Value: !Ref ProjectName
+        - Key: StudentName
+          Value: !Ref StudentName
+
+#Outputs:
+#  WebAppLB:
+#    Description: The load balancer URL
+#    Value: !Join ["", ["http://", !GetAtt WebAppLB.DNSName,]]
+#    Export:
+#      Name: !Sub ${ProjectName}-DNS-NAME
